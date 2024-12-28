@@ -1,0 +1,67 @@
+%run ./03_invoice_json_stream
+
+class streaminvoiceTestSuite():
+    def __init__(self):
+        self.base_data_dir = "/FileStore/data_spark_streaming_scholarnest"
+
+    def cleanTests(self):
+        print(f"Starting Cleanup...",end ='')
+        spark.sql("drop table if exists invoices_table")
+        dbutils.fs.rm("/user/hive/warehouse/invoices_table",True)
+
+        dbutils.fs.rm(f"{self.base_data_dir}/checkpoint/invoice",True)
+        dbutils.fs.rm(f"{self.base_data_dir}/data/invoices",True)
+
+        dbutils.fs.mkdirs(f"{self.base_data_dir}/data/invoices")
+        print("Done\n")
+
+    def ingestData(self,itr):
+        print(f"\tStarting Ingestion...",end = '')
+        dbutils.fs.cp(f"{self.base_data_dir}/datasets/invoices/invoices_{itr}.json", f"{self.base_data_dir}/data/invoices/")
+        print("Done")
+
+    def runTests(self):
+        import time
+        sleepTime = 90
+        self.cleanTests()
+        print("testing First iteration of batch invoice stream...")
+        self.ingestData(1)
+        invoice_stream = streamInvoices()
+        stream_query = invoice_stream.invoice_processing()
+        print(f"\tWaiting for {sleepTime} seconds ...")
+        time.sleep(sleepTime)
+        print("First iteration of invoice stream count completed")
+
+        '''
+        print("testing First iteration of batch invoice stream...")
+        self.ingestData(1)
+        print(f"\tWaiting for {sleepTime} seconds ...")
+        time.sleep(sleepTime)
+        print("First iteration of invoice stream count completed")'''
+
+        print("testing Second iteration of batch invoice stream...")
+        self.ingestData(2)
+        print(f"\tWaiting for {sleepTime} seconds ...")
+        time.sleep(sleepTime)
+        print("Second iteration of invoice stream count completed")
+
+        print("testing third iteration of batch invoice stream...")
+        self.ingestData(3)
+        print(f"\tWaiting for {sleepTime} seconds ...")
+        time.sleep(sleepTime)
+        print("Third iteration of invoice stream count completed")
+
+        print("testing Fourth iteration of batch invoice stream...")
+        self.ingestData(4)
+        print(f"\tWaiting for {sleepTime} seconds ...")
+        time.sleep(sleepTime)
+        print("Fourth iteration of invoice stream count completed")
+
+        stream_query.stop()
+
+
+
+streaming_invoice_test_suite = streaminvoiceTestSuite()
+streaming_invoice_test_suite.runTests()
+
+display(spark.sql("select * from invoices_table"))
