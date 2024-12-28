@@ -1,0 +1,78 @@
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+class streamInvoices():
+    def __init__(self):
+        self.base_data_dir = "/FileStore/data_spark_streaming_scholarnest"
+        
+    def read_raw_stream(self):
+        schema = StructType([StructField('CESS', DoubleType(), True), StructField('CGST', DoubleType(), True), StructField('CashierID', StringType(), True), StructField('CreatedTime', LongType(), True), StructField('CustomerCardNo', StringType(), True), StructField('CustomerType', StringType(), True), StructField('DeliveryAddress', StructType([StructField('AddressLine', StringType(), True), StructField('City', StringType(), True), StructField('ContactNumber', StringType(), True), StructField('PinCode', StringType(), True), StructField('State', StringType(), True)]), True), StructField('DeliveryType', StringType(), True), StructField('InvoiceLineItems', ArrayType(StructType([StructField('ItemCode', StringType(), True), StructField('ItemDescription', StringType(), True), StructField('ItemPrice', DoubleType(), True), StructField('ItemQty', LongType(), True), StructField('TotalValue', DoubleType(), True)]), True), True), StructField('InvoiceNumber', StringType(), True), StructField('NumberOfItems', LongType(), True), StructField('PaymentMethod', StringType(), True), StructField('PosID', StringType(), True), StructField('SGST', DoubleType(), True), StructField('StoreID', StringType(), True), StructField('TaxableAmount', DoubleType(), True), StructField('TotalAmount', DoubleType(), True)])
+        
+        df = spark.readStream.schema(schema).json(f"{self.base_data_dir}/data/invoices")
+        return df
+    
+    def get_nested_columns(self,raw_df):
+        struct_cols = []
+        array_cols = []
+        schema = raw_df.schema
+        for field in raw_df.schema.fields:
+            #print(field)
+            if isinstance(field.dataType,StructType):
+                struct_cols.append(field.name)
+            elif isinstance(field.dataType,ArrayType):
+                array_cols.append(field.name)
+        return struct_cols,array_cols
+    
+    def get_flattened_columns(self,raw_df,struct_columns,array_columns):
+        flattened_columns = []
+        for column in raw_df.columns:
+            if column not in struct_columns + array_columns:
+                flattened_columns.append(column)
+        return flattened_columns
+    
+    def get_struct_fields(self,struct_columns,raw_df):
+        struct_fields = []
+        for struct_column in struct_columns:
+            nested_fields = raw_df.select(f"{struct_column}.*").columns
+            for nested_field in nested_fields:
+                struct_fields.append(col(f"{struct_column}.{nested_field}").alias(nested_field))
+        return struct_fields
+    
+    def get_array_fields(self,array_columns,raw_df):
+        array_fields = []
+        for array_col in array_columns:
+            explode_df = raw_df.withColumn(array_col,explode(col(array_col)))
+            nested_fields = explode_df.select(f"{array_col}.*").columns
+        for nested_field in nested_fields:
+            array_fields.append(col(f"{array_col}.{nested_field}").alias(nested_field))
+        return array_fields,explode_df
+    
+    def create_final_df(self,flattened_columns,struct_fields,array_fields,explode_df):
+        all_columns = flattened_columns+struct_fields+array_fields
+        final_flattened_df = explode_df.select(*all_columns)
+        return final_flattened_df
+    
+    def overwrite_invoices(self,final_flattened_df):
+        return (final_flattened_df.writeStream
+                .format("delta")
+                .option("checkpointLocation",f"{self.base_data_dir}/checkpoint/invoice")
+                .outputMode("append")
+                .toTable("invoices_table")
+        )
+
+    def invoice_processing(self):
+        print(f"Starting invoice processing stream...",end='')
+        rawDF = self.read_raw_stream()
+        struct_columns,array_columns = self.get_nested_columns(rawDF)
+        flattened_columns = self.get_flattened_columns(rawDF,struct_columns,array_columns)
+        struct_fields = self.get_struct_fields(struct_columns,rawDF)
+        array_fields,explode_df  = self.get_array_fields(array_columns,rawDF)
+        final_df = self.create_final_df(flattened_columns,struct_fields,array_fields,explode_df)
+        stream_query = self.overwrite_invoices(final_df)
+        print("Done")
+        return stream_query 
+
+
+
+    
+
+
